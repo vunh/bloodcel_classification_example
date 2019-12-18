@@ -13,6 +13,31 @@ import copy
 import argparse
 
 
+def accuracy_per_class(predict_label, true_label, classes):
+    '''
+    :param predict_label: output of model (matrix)
+    :param true_label: labels from dataset (array of integers)
+    :param classes: class labels list()
+    :return:
+    '''
+    from numpy import sum, float, array
+    if isinstance(classes, int):
+        nclass = classes
+        classes = range(nclass)
+    else:
+        nclass = len(classes)
+
+    acc_per_class = []
+    for i in range(nclass):
+        idx = true_label == classes[i]
+        if idx.sum() != 0:
+            acc_per_class.append(sum(true_label[idx] == predict_label[idx]) / float(idx.sum()))
+    if len(acc_per_class) == 0:
+        return 0.
+
+    return array(acc_per_class).mean()
+
+
 def make_weights_for_balanced_classes(images, nclasses):
     count = [0] * nclasses
     for item in images:
@@ -61,7 +86,7 @@ def load_data(data_dir, settings):
     dataloaders_dict = {'train': train_loader, 'val': val_loader}
     #dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=settings['batch_size'], shuffle=True, num_workers=4) for x in ['train', 'val']}
 
-    return dataloaders_dict
+    return dataloaders_dict, image_datasets
 
 def initialize_model(model_name, num_classes, feature_extract, use_pretrained=True):
     # Initialize these variables which will be set in this if statement. Each of these
@@ -113,7 +138,7 @@ def set_parameter_requires_grad(model, feature_extracting):
         for param in model.parameters():
             param.requires_grad = False
 
-def train_model(model, dataloaders, criterion, optimizer, device, num_epochs=25, is_inception=False):
+def train_model(model, dataloaders, image_datasets, criterion, optimizer, device, num_epochs=25, is_inception=False):
     since = time.time()
 
     val_acc_history = []
@@ -126,6 +151,8 @@ def train_model(model, dataloaders, criterion, optimizer, device, num_epochs=25,
         print('-' * 10)
 
         # Each epoch has a training and validation phase
+        val_pred = np.array([], dtype=np.int_)
+        val_true = np.array([], dtype=np.int_)
         for phase in ['train', 'val']:
             if phase == 'train':
                 model.train()  # Set model to training mode
@@ -170,11 +197,20 @@ def train_model(model, dataloaders, criterion, optimizer, device, num_epochs=25,
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
+                if phase == 'val':
+                    val_pred = np.concatenate((val_pred, preds.cpu().numpy()), axis=0)
+                    val_true = np.concatenate((val_true, labels.data.cpu().numpy()), axis=0)
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
             epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
 
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+            if phase == 'val':
+                epoch_acc_cls = accuracy_per_class(val_pred, val_true, classes=len(image_datasets['train'].classes))
+
+            if phase == 'val':
+                print('{} Loss: {:.4f} Acc: {:.4f} ClsAcc: {:.4f}'.format(phase, epoch_loss, epoch_acc, epoch_acc_cls))
+            else:
+                print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
 
             # deep copy the model
             if phase == 'val' and epoch_acc > best_acc:
@@ -238,14 +274,14 @@ def main():
     model_ft = model_ft.to(device)
 
     # Data loader
-    dataloaders_dict = load_data(data_dir, settings={'input_size':input_size, 'batch_size':batch_size})
+    dataloaders_dict, image_datasets = load_data(data_dir, settings={'input_size':input_size, 'batch_size':batch_size})
 
     # optim and loss
     optimizer_ft, criterion = define_optim_loss(model_ft, feature_extract)
     
     
     # Train and evaluate
-    model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, device,
+    model_ft, hist = train_model(model_ft, dataloaders_dict, image_datasets, criterion, optimizer_ft, device,
                                 num_epochs=num_epochs, is_inception=(model_name=="inception"))
 
 if __name__== "__main__":
