@@ -10,7 +10,36 @@ import matplotlib.pyplot as plt
 import time
 import os
 import copy
+import argparse
 
+
+def load_data(data_dir, settings):
+    # Data augmentation and normalization for training
+    # Just normalization for validation
+    # settings have 2 keys: 'input_size' and 'batch_size'
+    data_transforms = {
+        'train': transforms.Compose([
+            transforms.RandomResizedCrop(settings['input_size']),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+        'val': transforms.Compose([
+            transforms.Resize(settings['input_size']),
+            transforms.CenterCrop(settings['input_size']),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+    }
+
+    print("Initializing Datasets and Dataloaders...")
+
+    # Create training and validation datasets
+    image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'val']}
+    # Create training and validation dataloaders
+    dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=settings['batch_size'], shuffle=True, num_workers=4) for x in ['train', 'val']}
+
+    return dataloaders_dict
 
 def initialize_model(model_name, num_classes, feature_extract, use_pretrained=True):
     # Initialize these variables which will be set in this if statement. Each of these
@@ -32,15 +61,37 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
 
     return model_ft, input_size
 
+def define_optim_loss(model_ft, feature_extract):
+    params_to_update = model_ft.parameters()
+    print("Params to learn:")
+    if feature_extract:
+        params_to_update = []
+        for name,param in model_ft.named_parameters():
+            if param.requires_grad == True:
+                params_to_update.append(param)
+                print("\t",name)
+    else:
+        for name,param in model_ft.named_parameters():
+            if param.requires_grad == True:
+                print("\t",name)
 
+    # Observe that all parameters are being optimized
+    optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
+
+
+    # Setup the loss fxn
+    criterion = nn.CrossEntropyLoss()
+
+
+
+    return optimizer_ft, criterion
 
 def set_parameter_requires_grad(model, feature_extracting):
     if feature_extracting:
         for param in model.parameters():
             param.requires_grad = False
 
-
-def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
+def train_model(model, dataloaders, criterion, optimizer, device, num_epochs=25, is_inception=False):
     since = time.time()
 
     val_acc_history = []
@@ -125,6 +176,11 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gpu_index", type=int, default=0)
+    args = parser.parse_args()
+
+
     print("PyTorch Version: ",torch.__version__)
     print("Torchvision Version: ",torchvision.__version__)
 
@@ -150,6 +206,25 @@ def main():
 
     model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
 
+    #print(model_ft)
+
+    
+    # Detect if we have a GPU available
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_index)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model_ft = model_ft.to(device)
+
+    # Data loader
+    dataloaders_dict = load_data(data_dir, settings={'input_size':input_size, 'batch_size':batch_size})
+
+    # optim and loss
+    optimizer_ft, criterion = define_optim_loss(model_ft, feature_extract)
+    
+    
+    # Train and evaluate
+    model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, device,
+                                num_epochs=num_epochs, is_inception=(model_name=="inception"))
 
 if __name__== "__main__":
     main()
