@@ -13,6 +13,19 @@ import copy
 import argparse
 
 
+def make_weights_for_balanced_classes(images, nclasses):
+    count = [0] * nclasses
+    for item in images:
+        count[item[1]] += 1
+    weight_per_class = [0.] * nclasses
+    N = float(sum(count))
+    for i in range(nclasses):
+        weight_per_class[i] = N/float(count[i])
+    weight = [0] * len(images)
+    for idx, val in enumerate(images):
+        weight[idx] = weight_per_class[val[1]]
+    return weight
+
 def load_data(data_dir, settings):
     # Data augmentation and normalization for training
     # Just normalization for validation
@@ -36,8 +49,17 @@ def load_data(data_dir, settings):
 
     # Create training and validation datasets
     image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'val']}
+
+    weights = make_weights_for_balanced_classes(image_datasets['train'].imgs, len(image_datasets['train'].classes))
+    weights = torch.DoubleTensor(weights)
+    weighted_sampler = torch.utils.data.sampler.WeightedRandomSampler(weights, len(weights))
+
     # Create training and validation dataloaders
-    dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=settings['batch_size'], shuffle=True, num_workers=4) for x in ['train', 'val']}
+    train_loader = torch.utils.data.DataLoader(image_datasets['train'], batch_size=settings['batch_size'], shuffle=False, sampler=weighted_sampler,
+                                               num_workers=4, pin_memory=True)
+    val_loader = torch.utils.data.DataLoader(image_datasets['val'], batch_size=settings['batch_size'], shuffle=False, num_workers=4)
+    dataloaders_dict = {'train': train_loader, 'val': val_loader}
+    #dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=settings['batch_size'], shuffle=True, num_workers=4) for x in ['train', 'val']}
 
     return dataloaders_dict
 
