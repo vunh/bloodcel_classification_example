@@ -11,6 +11,9 @@ import time
 import os
 import copy
 import argparse
+import sys
+import glob
+from sklearn.metrics import confusion_matrix
 
 
 def accuracy_per_class(predict_label, true_label, classes):
@@ -34,6 +37,8 @@ def accuracy_per_class(predict_label, true_label, classes):
             acc_per_class.append(sum(true_label[idx] == predict_label[idx]) / float(idx.sum()))
     if len(acc_per_class) == 0:
         return 0.
+
+    print(confusion_matrix(true_label, predict_label))
 
     return array(acc_per_class).mean()
 
@@ -81,8 +86,8 @@ def load_data(data_dir, settings):
 
     # Create training and validation dataloaders
     train_loader = torch.utils.data.DataLoader(image_datasets['train'], batch_size=settings['batch_size'], shuffle=False, sampler=weighted_sampler,
-                                               num_workers=4, pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(image_datasets['val'], batch_size=settings['batch_size'], shuffle=False, num_workers=4)
+                                               num_workers=8, pin_memory=True)
+    val_loader = torch.utils.data.DataLoader(image_datasets['val'], batch_size=settings['batch_size'], shuffle=False, num_workers=8)
     dataloaders_dict = {'train': train_loader, 'val': val_loader}
     #dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=settings['batch_size'], shuffle=True, num_workers=4) for x in ['train', 'val']}
 
@@ -211,10 +216,11 @@ def train_model(model, dataloaders, image_datasets, criterion, optimizer, device
                 print('{} Loss: {:.4f} Acc: {:.4f} ClsAcc: {:.4f}'.format(phase, epoch_loss, epoch_acc, epoch_acc_cls))
             else:
                 print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+            sys.stdout.flush()
 
             # deep copy the model
-            if phase == 'val' and epoch_acc > best_acc:
-                best_acc = epoch_acc
+            if phase == 'val' and epoch_acc_cls > best_acc:
+                best_acc = epoch_acc_cls
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
@@ -244,27 +250,33 @@ def main():
 
     # Top level data directory. Here we assume the format of the directory conforms
     #   to the ImageFolder structure
-    data_dir = "../data/hymenoptera_data"
+    data_dir = "../data/aml_train_val"
+    #data_dir = '../data/hymenoptera_data'
 
     # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]
     model_name = "resnet101"
 
     # Number of classes in the dataset
-    num_classes = 2
+    num_classes = len(glob.glob(data_dir + '/train/*'))
 
     # Batch size for training (change depending on how much memory you have)
-    batch_size = 8
+    batch_size = 32
 
     # Number of epochs to train for
-    num_epochs = 15
+    num_epochs = 150
 
     # Flag for feature extracting. When False, we finetune the whole model,
     #   when True we only update the reshaped layer params
     feature_extract = True
 
+
+
     model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
 
-    #print(model_ft)
+    # Data loader
+    dataloaders_dict, image_datasets = load_data(data_dir, settings={'input_size': input_size, 'batch_size': batch_size})
+    print(image_datasets['train'].classes)
+
 
     
     # Detect if we have a GPU available
@@ -273,8 +285,7 @@ def main():
 
     model_ft = model_ft.to(device)
 
-    # Data loader
-    dataloaders_dict, image_datasets = load_data(data_dir, settings={'input_size':input_size, 'batch_size':batch_size})
+
 
     # optim and loss
     optimizer_ft, criterion = define_optim_loss(model_ft, feature_extract)
