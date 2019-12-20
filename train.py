@@ -14,6 +14,7 @@ import argparse
 import sys
 import glob
 from sklearn.metrics import confusion_matrix
+import pickle
 
 
 def accuracy_per_class(predict_label, true_label, classes):
@@ -150,6 +151,7 @@ def train_model(model, dataloaders, image_datasets, criterion, optimizer, device
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
+    best_results = {}
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -157,6 +159,7 @@ def train_model(model, dataloaders, image_datasets, criterion, optimizer, device
 
         # Each epoch has a training and validation phase
         val_pred = np.array([], dtype=np.int_)
+        val_pred_raw = np.zeros(shape=(0, len(image_datasets['train'].classes)), dtype=np.float_)
         val_true = np.array([], dtype=np.int_)
         for phase in ['train', 'val']:
             if phase == 'train':
@@ -204,6 +207,7 @@ def train_model(model, dataloaders, image_datasets, criterion, optimizer, device
                 running_corrects += torch.sum(preds == labels.data)
                 if phase == 'val':
                     val_pred = np.concatenate((val_pred, preds.cpu().numpy()), axis=0)
+                    val_pred_raw = np.concatenate((val_pred_raw, outputs.data.cpu().numpy()), axis=0)
                     val_true = np.concatenate((val_true, labels.data.cpu().numpy()), axis=0)
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
@@ -222,6 +226,17 @@ def train_model(model, dataloaders, image_datasets, criterion, optimizer, device
             if phase == 'val' and epoch_acc_cls > best_acc:
                 best_acc = epoch_acc_cls
                 best_model_wts = copy.deepcopy(model.state_dict())
+                best_results = {'true': val_true, 'pred': val_pred, 'pred_raw': val_pred_raw,
+                                'acc_per_class': epoch_acc_cls,
+                                'model_weights': best_model_wts,
+                                'classes': image_datasets['train'].classes}
+
+                # Save best results and model
+                result_filename = 'result.pkl'
+                if os.path.isfile(result_filename):
+                    os.remove(result_filename)
+                with open(result_filename, 'wb') as handle:
+                    pickle.dump(best_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
 
@@ -230,6 +245,8 @@ def train_model(model, dataloaders, image_datasets, criterion, optimizer, device
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Best val Acc: {:4f}'.format(best_acc))
+
+
 
     # load best model weights
     model.load_state_dict(best_model_wts)
